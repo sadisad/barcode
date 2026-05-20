@@ -2,9 +2,13 @@ import base64
 import argparse
 import qrcode
 import requests
+import urllib3
 import json
 import mimetypes
 from io import BytesIO
+
+# Suppress InsecureRequestWarning if SSL verify is False
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def local_file_to_base64(path):
     """Convert a local image file to a base64 data URL."""
@@ -34,7 +38,8 @@ def generate_qr_base64(data):
 def register_to_server(server_base_url, payload):
     """Register certificate to the Flask server and get the verification URL."""
     api_url = f"{server_base_url.rstrip('/')}/api/certificates"
-    resp = requests.post(api_url, json=payload, timeout=10)
+    # Tambahkan verify=False agar tidak error walau SSL domain baru belum selesai di-generate oleh Railway
+    resp = requests.post(api_url, json=payload, timeout=10, verify=False)
     resp.raise_for_status()
     result = resp.json()
     cert_id = result["id"]

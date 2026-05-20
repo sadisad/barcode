@@ -3,7 +3,17 @@ import argparse
 import qrcode
 import requests
 import json
+import mimetypes
 from io import BytesIO
+
+def local_file_to_base64(path):
+    """Convert a local image file to a base64 data URL."""
+    mime, _ = mimetypes.guess_type(path)
+    if mime is None:
+        mime = "image/png"
+    with open(path, "rb") as f:
+        data = base64.b64encode(f.read()).decode("utf-8")
+    return f"data:{mime};base64,{data}"
 
 def generate_qr_base64(data):
     qr = qrcode.QRCode(
@@ -40,10 +50,11 @@ def generate_certificate(
     tanggal_ttd="22 April 2026",
     cert_id_text="16072025701220202P0653438",
     prodi="Sistem Informasi",
-    template_path="template.html",
     output_path="output.html",
+    template_path="template.html",
     nilai_word=75, nilai_excel=75, nilai_ppt=75, nilai_inet=75,
     grade_word="B", grade_excel="B", grade_ppt="B", grade_inet="B",
+    url_id=None,
 ):
     # Step 1: Register ke server untuk dapat ID & URL verifikasi
     print(f"[1/3] Registering certificate to server: {server_base_url}")
@@ -65,6 +76,9 @@ def generate_certificate(
         "grade_word": grade_word, "grade_excel": grade_excel,
         "grade_ppt": grade_ppt,   "grade_inet": grade_inet,
     }
+
+    if url_id:
+        payload["url_id"] = url_id
 
     db_id, verify_url = register_to_server(server_base_url, payload)
     print(f"    [OK] Certificate registered! ID={db_id}")
@@ -106,13 +120,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate Certificate")
     parser.add_argument("--nama",         type=str, required=True,  help="Nama Mahasiswa")
     parser.add_argument("--nim",          type=str, default="701220338", help="NIM Mahasiswa")
-    parser.add_argument("--foto",         type=str, default="https://s31.uinjambi.ac.id/sipandu-it/foto_profil/FOTO-20250716-113927-2715.jpg", help="URL Foto Mahasiswa")
-    parser.add_argument("--server",       type=str, default="http://localhost:5000", help="Base URL server Flask (misal: https://your-app.railway.app)")
+    parser.add_argument("--foto",         type=str, default=None, help="URL Foto Mahasiswa (online)")
+    parser.add_argument("--foto-file",    type=str, default=None, help="Path file foto lokal (misal: image.png)")
+    parser.add_argument("--server",       type=str, default="http://localhost:5000", help="Base URL server Flask")
     parser.add_argument("--tanggal-ujian",type=str, default="14 April 2026", help="Tanggal Ujian")
     parser.add_argument("--tanggal-ttd",  type=str, default="22 April 2026", help="Tanggal Tanda Tangan")
     parser.add_argument("--cert-id",      type=str, default="16072025701220202P0653438", help="ID/Nomor Sertifikat")
     parser.add_argument("--prodi",        type=str, default="Sistem Informasi", help="Program Studi")
     parser.add_argument("--output",       type=str, default="output.html", help="Output HTML file")
+    parser.add_argument("--url-id",       type=int, default=None, help="Custom URL ID (misal: 3978). Jika kosong akan random 4 digit.")
     parser.add_argument("--nilai-word",   type=int, default=75)
     parser.add_argument("--nilai-excel",  type=int, default=75)
     parser.add_argument("--nilai-ppt",    type=int, default=75)
@@ -123,10 +139,20 @@ if __name__ == "__main__":
     parser.add_argument("--grade-inet",   type=str, default="B")
 
     args = parser.parse_args()
+
+    # Tentukan sumber foto: file lokal lebih prioritas dari URL
+    if args.foto_file:
+        print(f"[INFO] Converting local foto file: {args.foto_file}")
+        foto_url = local_file_to_base64(args.foto_file)
+    elif args.foto:
+        foto_url = args.foto
+    else:
+        foto_url = ""  # kosong
+
     generate_certificate(
         args.nama,
         args.nim,
-        args.foto,
+        foto_url,
         args.server,
         args.tanggal_ujian,
         args.tanggal_ttd,
@@ -137,4 +163,5 @@ if __name__ == "__main__":
         nilai_ppt=args.nilai_ppt,   nilai_inet=args.nilai_inet,
         grade_word=args.grade_word, grade_excel=args.grade_excel,
         grade_ppt=args.grade_ppt,   grade_inet=args.grade_inet,
+        url_id=args.url_id,
     )

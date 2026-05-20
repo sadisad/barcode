@@ -1,6 +1,7 @@
 from flask import Flask, render_template_string, abort, jsonify, request
 import sqlite3
 import os
+import random
 
 app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), "certificates.db")
@@ -17,6 +18,7 @@ def init_db():
         conn.execute("""
             CREATE TABLE IF NOT EXISTS certificates (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                url_id      INTEGER UNIQUE NOT NULL,
                 nama        TEXT    NOT NULL,
                 nim         TEXT    NOT NULL,
                 prodi       TEXT    NOT NULL DEFAULT 'Sistem Informasi',
@@ -192,11 +194,11 @@ CERT_TEMPLATE = """<!DOCTYPE html>
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
 
-@app.route("/keaslian-sertifikat/<int:cert_id>")
-def verify_certificate(cert_id):
+@app.route("/keaslian-sertifikat/<int:url_id>")
+def verify_certificate(url_id):
     with get_db() as conn:
         cert = conn.execute(
-            "SELECT * FROM certificates WHERE id = ?", (cert_id,)
+            "SELECT * FROM certificates WHERE url_id = ?", (url_id,)
         ).fetchone()
     if cert is None:
         abort(404)
@@ -211,14 +213,28 @@ def add_certificate():
         if field not in data:
             return jsonify({"error": f"Missing field: {field}"}), 400
 
+    # Gunakan url_id dari request, atau generate random 4-digit (1000-9999)
     with get_db() as conn:
+        if "url_id" in data and data["url_id"]:
+            url_id = int(data["url_id"])
+            # Cek sudah dipakai belum
+            existing = conn.execute("SELECT id FROM certificates WHERE url_id = ?", (url_id,)).fetchone()
+            if existing:
+                return jsonify({"error": f"url_id {url_id} sudah dipakai"}), 409
+        else:
+            # Auto-generate url_id unik 4-digit
+            used = {row[0] for row in conn.execute("SELECT url_id FROM certificates").fetchall()}
+            available = [i for i in range(1000, 9999) if i not in used]
+            url_id = random.choice(available) if available else random.randint(10000, 99999)
+
         cur = conn.execute("""
             INSERT INTO certificates
-              (nama, nim, prodi, foto_url, tanggal_ujian, tanggal_ttd, cert_id, qr_base64,
+              (url_id, nama, nim, prodi, foto_url, tanggal_ujian, tanggal_ttd, cert_id, qr_base64,
                nilai_word, nilai_excel, nilai_ppt, nilai_inet,
                grade_word, grade_excel, grade_ppt, grade_inet)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
+            url_id,
             data["nama"],
             data["nim"],
             data.get("prodi", "Sistem Informasi"),
@@ -233,9 +249,8 @@ def add_certificate():
             data.get("grade_ppt", "B"),  data.get("grade_inet", "B"),
         ))
         conn.commit()
-        new_id = cur.lastrowid
 
-    return jsonify({"id": new_id, "url": f"/keaslian-sertifikat/{new_id}"}), 201
+    return jsonify({"id": url_id, "url": f"/keaslian-sertifikat/{url_id}"}), 201
 
 @app.route("/")
 def index():

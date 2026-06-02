@@ -424,7 +424,7 @@ def update_certificate(url_id):
 
 @app.route("/")
 def index():
-    return "<h3>Certificate Verification Server</h3><p>Access: /dashboard to generate</p>", 200
+    return "<h3>Certificate Verification Server</h3>", 200
 
 init_db()
 

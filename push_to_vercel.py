@@ -4,7 +4,7 @@ from generate_cert import generate_certificate
 import urllib3
 urllib3.disable_warnings()
 
-SERVER = "https://barcode-kappa-rust.vercel.app"
+SERVER = "https://sipandu-it-uinjambi.my.id"
 
 # ID -> File path mapping
 files = {

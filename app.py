@@ -107,8 +107,8 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
             <input type="text" id="tanggal_ttd" name="tanggal_ttd" value="22 April 2026">
         </div>
         <div class="form-group">
-            <label for="cert_id">Nomor Sertifikat</label>
-            <input type="text" id="cert_id" name="cert_id" value="16072025701220202P0653438">
+            <label for="cert_id">Nomor Sertifikat (opsional)</label>
+            <input type="text" id="cert_id" name="cert_id" placeholder="Biarkan kosong untuk generate otomatis">
         </div>
         <button type="submit">Generate & Lihat Sertifikat</button>
     </form>
@@ -295,7 +295,9 @@ def dashboard():
         prodi = request.form.get("prodi", "Sistem Informasi")
         tanggal_ujian = request.form.get("tanggal_ujian", "14 April 2026")
         tanggal_ttd = request.form.get("tanggal_ttd", "22 April 2026")
-        cert_id_text = request.form.get("cert_id", "16072025701220202P0653438")
+        cert_id_text = request.form.get("cert_id", "").strip()
+        if not cert_id_text:
+            cert_id_text = f"160720257012{random.randint(10000, 99999)}P06{random.randint(10000, 99999)}"
         
         foto = request.files.get("foto")
         foto_url = ""

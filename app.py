@@ -78,7 +78,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 <body>
 <div class="container">
     <h2>Generate Sertifikat Baru</h2>
-    <form action="/dashboard" method="POST" enctype="multipart/form-data">
+    <form action="/yuhuu" method="POST" enctype="multipart/form-data">
         <div class="section-title">Data Utama</div>
         <div class="form-group">
             <label for="nama">Nama Lengkap</label>
@@ -285,7 +285,7 @@ def generate_qr_base64(data):
     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{img_str}"
 
-@app.route("/dashboard", methods=["GET", "POST"])
+@app.route("/yuhuu", methods=["GET", "POST"])
 def dashboard():
     if request.method == "GET":
         return render_template_string(DASHBOARD_TEMPLATE)

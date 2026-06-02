@@ -1,9 +1,12 @@
-from flask import Flask, render_template_string, abort, jsonify, request
+from flask import Flask, render_template_string, abort, jsonify, request, redirect
 import psycopg2
 import psycopg2.extras
 import os
 import random
 from dotenv import load_dotenv
+import qrcode
+from io import BytesIO
+import base64
 
 load_dotenv()
 
@@ -50,6 +53,68 @@ def init_db():
         print("Error initializing database:", e)
 
 init_db()
+
+# ─── HTML Template ───────────────────────────────────────────────────────────
+
+DASHBOARD_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Generator Sertifikat</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+    body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; margin: 0; padding: 20px; }
+    .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    h2 { text-align: center; color: #333; margin-bottom: 20px; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: 600; color: #555; }
+    input[type="text"], input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+    button { width: 100%; padding: 12px; background-color: #2B4961; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+    button:hover { background-color: #1e3344; }
+    .section-title { font-size: 14px; font-weight: bold; color: #888; text-transform: uppercase; margin-top: 25px; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h2>Generate Sertifikat Baru</h2>
+    <form action="/dashboard" method="POST" enctype="multipart/form-data">
+        <div class="section-title">Data Utama</div>
+        <div class="form-group">
+            <label for="nama">Nama Lengkap</label>
+            <input type="text" id="nama" name="nama" required placeholder="Masukkan Nama Lengkap">
+        </div>
+        <div class="form-group">
+            <label for="foto">Foto Profil (Rasio 3:4)</label>
+            <input type="file" id="foto" name="foto" accept="image/*" required>
+        </div>
+        
+        <div class="section-title">Data Tambahan (Bisa Dibiarkan Default)</div>
+        <div class="form-group">
+            <label for="nim">NIM</label>
+            <input type="text" id="nim" name="nim" placeholder="Contoh: 701220338" value="701220338">
+        </div>
+        <div class="form-group">
+            <label for="prodi">Program Studi</label>
+            <input type="text" id="prodi" name="prodi" value="Sistem Informasi">
+        </div>
+        <div class="form-group">
+            <label for="tanggal_ujian">Tanggal Ujian</label>
+            <input type="text" id="tanggal_ujian" name="tanggal_ujian" value="14 April 2026">
+        </div>
+        <div class="form-group">
+            <label for="tanggal_ttd">Tanggal Tanda Tangan</label>
+            <input type="text" id="tanggal_ttd" name="tanggal_ttd" value="22 April 2026">
+        </div>
+        <div class="form-group">
+            <label for="cert_id">Nomor Sertifikat</label>
+            <input type="text" id="cert_id" name="cert_id" value="16072025701220202P0653438">
+        </div>
+        <button type="submit">Generate & Lihat Sertifikat</button>
+    </form>
+</div>
+</body>
+</html>"""
 
 # ─── HTML Template ───────────────────────────────────────────────────────────
 
@@ -204,6 +269,154 @@ CERT_TEMPLATE = """<!DOCTYPE html>
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
 
+def generate_qr_base64(data):
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{img_str}"
+
+@app.route("/dashboard", methods=["GET", "POST"])
+def dashboard():
+    if request.method == "GET":
+        return render_template_string(DASHBOARD_TEMPLATE)
+    else:
+        nama = request.form.get("nama")
+        nim = request.form.get("nim", "701220338")
+        prodi = request.form.get("prodi", "Sistem Informasi")
+        tanggal_ujian = request.form.get("tanggal_ujian", "14 April 2026")
+        tanggal_ttd = request.form.get("tanggal_ttd", "22 April 2026")
+        cert_id_text = request.form.get("cert_id", "16072025701220202P0653438")
+        
+        foto = request.files.get("foto")
+        foto_url = ""
+        if foto and foto.filename:
+            mime = foto.mimetype or "image/png"
+            data = base64.b64encode(foto.read()).decode("utf-8")
+            foto_url = f"data:{mime};base64,{data}"
+
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT url_id FROM certificates")
+                used = {row[0] for row in cur.fetchall()}
+                available = [i for i in range(1000, 9999) if i not in used]
+                url_id = random.choice(available) if available else random.randint(10000, 99999)
+                
+                # Base URL for verify
+                base_url = request.host_url.rstrip("/")
+                verify_url = f"{base_url}/keaslian-sertifikat/{url_id}"
+                qr_base64 = generate_qr_base64(verify_url)
+
+                cur.execute("""
+                    INSERT INTO certificates
+                      (url_id, nama, nim, prodi, foto_url, tanggal_ujian, tanggal_ttd, cert_id, qr_base64)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    url_id, nama, nim, prodi, foto_url, tanggal_ujian, tanggal_ttd, cert_id_text, qr_base64
+                ))
+            conn.commit()
+
+        return redirect(f"/keaslian-sertifikat/{url_id}")
+
+@app.route("/keaslian-sertifikat/<int:url_id>")
+def verify_certificate(url_id):
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM certificates WHERE url_id = %s", (url_id,)
+            )
+            cert = cur.fetchone()
+    if cert is None:
+        abort(404)
+    return render_template_string(CERT_TEMPLATE, cert=cert)
+
+@app.route("/api/certificates", methods=["POST"])
+def add_certificate():
+    """API untuk menambah sertifikat baru. Returns the new certificate ID."""
+    data = request.get_json(force=True)
+    required = ["nama", "nim", "tanggal_ujian", "tanggal_ttd", "cert_id", "qr_base64"]
+    for field in required:
+        if field not in data:
+            return jsonify({"error": f"Missing field: {field}"}), 400
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            if "url_id" in data and data["url_id"]:
+                url_id = int(data["url_id"])
+                cur.execute("SELECT id FROM certificates WHERE url_id = %s", (url_id,))
+                existing = cur.fetchone()
+                if existing:
+                    return jsonify({"error": f"url_id {url_id} sudah dipakai"}), 409
+            else:
+                cur.execute("SELECT url_id FROM certificates")
+                used = {row[0] for row in cur.fetchall()}
+                available = [i for i in range(1000, 9999) if i not in used]
+                url_id = random.choice(available) if available else random.randint(10000, 99999)
+
+            cur.execute("""
+                INSERT INTO certificates
+                  (url_id, nama, nim, prodi, foto_url, tanggal_ujian, tanggal_ttd, cert_id, qr_base64,
+                   nilai_word, nilai_excel, nilai_ppt, nilai_inet,
+                   grade_word, grade_excel, grade_ppt, grade_inet)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                url_id,
+                data["nama"],
+                data["nim"],
+                data.get("prodi", "Sistem Informasi"),
+                data.get("foto_url"),
+                data["tanggal_ujian"],
+                data["tanggal_ttd"],
+                data["cert_id"],
+                data["qr_base64"],
+                data.get("nilai_word", 75), data.get("nilai_excel", 75),
+                data.get("nilai_ppt", 75),  data.get("nilai_inet", 75),
+                data.get("grade_word", "B"), data.get("grade_excel", "B"),
+                data.get("grade_ppt", "B"),  data.get("grade_inet", "B"),
+            ))
+        conn.commit()
+
+    return jsonify({"id": url_id, "url": f"/keaslian-sertifikat/{url_id}"}), 201
+
+@app.route("/api/certificates/<int:url_id>", methods=["PATCH"])
+def update_certificate(url_id):
+    """API untuk update data sertifikat yang sudah ada berdasarkan url_id."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM certificates WHERE url_id = %s", (url_id,)
+            )
+            existing = cur.fetchone()
+            if existing is None:
+                return jsonify({"error": f"Certificate with url_id {url_id} not found"}), 404
+
+            data = request.get_json(force=True)
+
+            allowed_fields = [
+                "tanggal_ujian", "tanggal_ttd", "cert_id", "qr_base64",
+                "nilai_word", "nilai_excel", "nilai_ppt", "nilai_inet",
+                "grade_word", "grade_excel", "grade_ppt", "grade_inet",
+                "nama", "nim", "prodi", "foto_url"
+            ]
+            updates = {k: v for k, v in data.items() if k in allowed_fields}
+            if not updates:
+                return jsonify({"error": "No valid fields to update"}), 400
+
+            set_clause = ", ".join(f"{k} = %s" for k in updates)
+            values = list(updates.values()) + [url_id]
+            cur.execute(
+                f"UPDATE certificates SET {set_clause} WHERE url_id = %s", values
+        return redirect(f"/keaslian-sertifikat/{url_id}")
+
 @app.route("/keaslian-sertifikat/<int:url_id>")
 def verify_certificate(url_id):
     with get_db() as conn:
@@ -299,7 +512,7 @@ def update_certificate(url_id):
 
 @app.route("/")
 def index():
-    return "<h3>Certificate Verification Server</h3><p>Access: /keaslian-sertifikat/&lt;id&gt;</p>", 200
+    return "<h3>Certificate Verification Server</h3><p>Access: /dashboard to generate</p>", 200
 
 init_db()
 

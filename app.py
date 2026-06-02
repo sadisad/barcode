@@ -1,43 +1,53 @@
 from flask import Flask, render_template_string, abort, jsonify, request
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import os
 import random
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
-DB_PATH = os.path.join(os.path.dirname(__file__), "certificates.db")
 
 # ─── Database ────────────────────────────────────────────────────────────────
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(os.environ.get("POSTGRES_URL"))
     return conn
 
 def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS certificates (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                url_id      INTEGER UNIQUE NOT NULL,
-                nama        TEXT    NOT NULL,
-                nim         TEXT    NOT NULL,
-                prodi       TEXT    NOT NULL DEFAULT 'Sistem Informasi',
-                foto_url    TEXT,
-                tanggal_ujian TEXT  NOT NULL,
-                tanggal_ttd   TEXT  NOT NULL,
-                cert_id     TEXT    NOT NULL,
-                qr_base64   TEXT    NOT NULL,
-                nilai_word  INTEGER DEFAULT 75,
-                nilai_excel INTEGER DEFAULT 75,
-                nilai_ppt   INTEGER DEFAULT 75,
-                nilai_inet  INTEGER DEFAULT 75,
-                grade_word  TEXT    DEFAULT 'B',
-                grade_excel TEXT    DEFAULT 'B',
-                grade_ppt   TEXT    DEFAULT 'B',
-                grade_inet  TEXT    DEFAULT 'B'
-            )
-        """)
-        conn.commit()
+    if not os.environ.get("POSTGRES_URL"):
+        print("POSTGRES_URL is not set. Skipping DB init.")
+        return
+        
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS certificates (
+                        id          SERIAL PRIMARY KEY,
+                        url_id      INTEGER UNIQUE NOT NULL,
+                        nama        TEXT    NOT NULL,
+                        nim         TEXT    NOT NULL,
+                        prodi       TEXT    NOT NULL DEFAULT 'Sistem Informasi',
+                        foto_url    TEXT,
+                        tanggal_ujian TEXT  NOT NULL,
+                        tanggal_ttd   TEXT  NOT NULL,
+                        cert_id     TEXT    NOT NULL,
+                        qr_base64   TEXT    NOT NULL,
+                        nilai_word  INTEGER DEFAULT 75,
+                        nilai_excel INTEGER DEFAULT 75,
+                        nilai_ppt   INTEGER DEFAULT 75,
+                        nilai_inet  INTEGER DEFAULT 75,
+                        grade_word  TEXT    DEFAULT 'B',
+                        grade_excel TEXT    DEFAULT 'B',
+                        grade_ppt   TEXT    DEFAULT 'B',
+                        grade_inet  TEXT    DEFAULT 'B'
+                    )
+                """)
+            conn.commit()
+    except Exception as e:
+        print("Error initializing database:", e)
 
 init_db()
 
@@ -197,9 +207,11 @@ CERT_TEMPLATE = """<!DOCTYPE html>
 @app.route("/keaslian-sertifikat/<int:url_id>")
 def verify_certificate(url_id):
     with get_db() as conn:
-        cert = conn.execute(
-            "SELECT * FROM certificates WHERE url_id = ?", (url_id,)
-        ).fetchone()
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM certificates WHERE url_id = %s", (url_id,)
+            )
+            cert = cur.fetchone()
     if cert is None:
         abort(404)
     return render_template_string(CERT_TEMPLATE, cert=cert)
@@ -213,41 +225,41 @@ def add_certificate():
         if field not in data:
             return jsonify({"error": f"Missing field: {field}"}), 400
 
-    # Gunakan url_id dari request, atau generate random 4-digit (1000-9999)
     with get_db() as conn:
-        if "url_id" in data and data["url_id"]:
-            url_id = int(data["url_id"])
-            # Cek sudah dipakai belum
-            existing = conn.execute("SELECT id FROM certificates WHERE url_id = ?", (url_id,)).fetchone()
-            if existing:
-                return jsonify({"error": f"url_id {url_id} sudah dipakai"}), 409
-        else:
-            # Auto-generate url_id unik 4-digit
-            used = {row[0] for row in conn.execute("SELECT url_id FROM certificates").fetchall()}
-            available = [i for i in range(1000, 9999) if i not in used]
-            url_id = random.choice(available) if available else random.randint(10000, 99999)
+        with conn.cursor() as cur:
+            if "url_id" in data and data["url_id"]:
+                url_id = int(data["url_id"])
+                cur.execute("SELECT id FROM certificates WHERE url_id = %s", (url_id,))
+                existing = cur.fetchone()
+                if existing:
+                    return jsonify({"error": f"url_id {url_id} sudah dipakai"}), 409
+            else:
+                cur.execute("SELECT url_id FROM certificates")
+                used = {row[0] for row in cur.fetchall()}
+                available = [i for i in range(1000, 9999) if i not in used]
+                url_id = random.choice(available) if available else random.randint(10000, 99999)
 
-        cur = conn.execute("""
-            INSERT INTO certificates
-              (url_id, nama, nim, prodi, foto_url, tanggal_ujian, tanggal_ttd, cert_id, qr_base64,
-               nilai_word, nilai_excel, nilai_ppt, nilai_inet,
-               grade_word, grade_excel, grade_ppt, grade_inet)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            url_id,
-            data["nama"],
-            data["nim"],
-            data.get("prodi", "Sistem Informasi"),
-            data.get("foto_url"),
-            data["tanggal_ujian"],
-            data["tanggal_ttd"],
-            data["cert_id"],
-            data["qr_base64"],
-            data.get("nilai_word", 75), data.get("nilai_excel", 75),
-            data.get("nilai_ppt", 75),  data.get("nilai_inet", 75),
-            data.get("grade_word", "B"), data.get("grade_excel", "B"),
-            data.get("grade_ppt", "B"),  data.get("grade_inet", "B"),
-        ))
+            cur.execute("""
+                INSERT INTO certificates
+                  (url_id, nama, nim, prodi, foto_url, tanggal_ujian, tanggal_ttd, cert_id, qr_base64,
+                   nilai_word, nilai_excel, nilai_ppt, nilai_inet,
+                   grade_word, grade_excel, grade_ppt, grade_inet)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                url_id,
+                data["nama"],
+                data["nim"],
+                data.get("prodi", "Sistem Informasi"),
+                data.get("foto_url"),
+                data["tanggal_ujian"],
+                data["tanggal_ttd"],
+                data["cert_id"],
+                data["qr_base64"],
+                data.get("nilai_word", 75), data.get("nilai_excel", 75),
+                data.get("nilai_ppt", 75),  data.get("nilai_inet", 75),
+                data.get("grade_word", "B"), data.get("grade_excel", "B"),
+                data.get("grade_ppt", "B"),  data.get("grade_inet", "B"),
+            ))
         conn.commit()
 
     return jsonify({"id": url_id, "url": f"/keaslian-sertifikat/{url_id}"}), 201
@@ -256,30 +268,31 @@ def add_certificate():
 def update_certificate(url_id):
     """API untuk update data sertifikat yang sudah ada berdasarkan url_id."""
     with get_db() as conn:
-        existing = conn.execute(
-            "SELECT * FROM certificates WHERE url_id = ?", (url_id,)
-        ).fetchone()
-        if existing is None:
-            return jsonify({"error": f"Certificate with url_id {url_id} not found"}), 404
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM certificates WHERE url_id = %s", (url_id,)
+            )
+            existing = cur.fetchone()
+            if existing is None:
+                return jsonify({"error": f"Certificate with url_id {url_id} not found"}), 404
 
-        data = request.get_json(force=True)
+            data = request.get_json(force=True)
 
-        # Bangun query UPDATE dinamis dari field yang dikirim
-        allowed_fields = [
-            "tanggal_ujian", "tanggal_ttd", "cert_id", "qr_base64",
-            "nilai_word", "nilai_excel", "nilai_ppt", "nilai_inet",
-            "grade_word", "grade_excel", "grade_ppt", "grade_inet",
-            "nama", "nim", "prodi", "foto_url"
-        ]
-        updates = {k: v for k, v in data.items() if k in allowed_fields}
-        if not updates:
-            return jsonify({"error": "No valid fields to update"}), 400
+            allowed_fields = [
+                "tanggal_ujian", "tanggal_ttd", "cert_id", "qr_base64",
+                "nilai_word", "nilai_excel", "nilai_ppt", "nilai_inet",
+                "grade_word", "grade_excel", "grade_ppt", "grade_inet",
+                "nama", "nim", "prodi", "foto_url"
+            ]
+            updates = {k: v for k, v in data.items() if k in allowed_fields}
+            if not updates:
+                return jsonify({"error": "No valid fields to update"}), 400
 
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [url_id]
-        conn.execute(
-            f"UPDATE certificates SET {set_clause} WHERE url_id = ?", values
-        )
+            set_clause = ", ".join(f"{k} = %s" for k in updates)
+            values = list(updates.values()) + [url_id]
+            cur.execute(
+                f"UPDATE certificates SET {set_clause} WHERE url_id = %s", values
+            )
         conn.commit()
 
     return jsonify({"success": True, "url_id": url_id, "updated": list(updates.keys())}), 200
@@ -287,6 +300,8 @@ def update_certificate(url_id):
 @app.route("/")
 def index():
     return "<h3>Certificate Verification Server</h3><p>Access: /keaslian-sertifikat/&lt;id&gt;</p>", 200
+
+init_db()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

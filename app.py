@@ -252,6 +252,38 @@ def add_certificate():
 
     return jsonify({"id": url_id, "url": f"/keaslian-sertifikat/{url_id}"}), 201
 
+@app.route("/api/certificates/<int:url_id>", methods=["PATCH"])
+def update_certificate(url_id):
+    """API untuk update data sertifikat yang sudah ada berdasarkan url_id."""
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT * FROM certificates WHERE url_id = ?", (url_id,)
+        ).fetchone()
+        if existing is None:
+            return jsonify({"error": f"Certificate with url_id {url_id} not found"}), 404
+
+        data = request.get_json(force=True)
+
+        # Bangun query UPDATE dinamis dari field yang dikirim
+        allowed_fields = [
+            "tanggal_ujian", "tanggal_ttd", "cert_id", "qr_base64",
+            "nilai_word", "nilai_excel", "nilai_ppt", "nilai_inet",
+            "grade_word", "grade_excel", "grade_ppt", "grade_inet",
+            "nama", "nim", "prodi", "foto_url"
+        ]
+        updates = {k: v for k, v in data.items() if k in allowed_fields}
+        if not updates:
+            return jsonify({"error": "No valid fields to update"}), 400
+
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [url_id]
+        conn.execute(
+            f"UPDATE certificates SET {set_clause} WHERE url_id = ?", values
+        )
+        conn.commit()
+
+    return jsonify({"success": True, "url_id": url_id, "updated": list(updates.keys())}), 200
+
 @app.route("/")
 def index():
     return "<h3>Certificate Verification Server</h3><p>Access: /keaslian-sertifikat/&lt;id&gt;</p>", 200

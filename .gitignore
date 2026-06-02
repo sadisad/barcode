@@ -6,3 +6,5 @@ image.png
 photo.png
 *.db
 .env
+
+.vercel

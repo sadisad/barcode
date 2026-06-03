@@ -93,9 +93,15 @@ def generate_certificate(
     print(f"[2/3] Generating QR Code -> {verify_url}")
     qr_base64 = generate_qr_base64(verify_url)
 
-    # Step 3: Update server dengan QR Code yang benar
-    # (Patch via re-insert isn't ideal but works; alternatively call PATCH)
-    # Re-generate HTML output locally
+    # Step 2b: PATCH server dengan QR Code yang benar (gantikan placeholder)
+    patch_url = f"{server_base_url.rstrip('/')}/api/certificates/{db_id}"
+    patch_resp = requests.patch(patch_url, json={"qr_base64": qr_base64}, timeout=10, verify=False)
+    if patch_resp.status_code == 200:
+        print(f"    [OK] QR code updated on server!")
+    else:
+        print(f"    [WARN] Failed to patch QR on server: {patch_resp.status_code} {patch_resp.text}")
+
+    # Step 3: Generate HTML output locally
     print(f"[3/3] Generating HTML output -> {output_path}")
     with open(template_path, "r", encoding="utf-8") as f:
         html_content = f.read()
